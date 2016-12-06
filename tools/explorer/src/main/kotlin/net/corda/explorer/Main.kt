@@ -19,6 +19,7 @@ import net.corda.explorer.model.SettingsModel
 import net.corda.explorer.views.*
 import net.corda.explorer.views.cordapps.cash.CashViewer
 import net.corda.flows.CashFlow
+import net.corda.flows.IssuerFlow.IssuanceRequester
 import net.corda.node.driver.PortAllocation
 import net.corda.node.driver.driver
 import net.corda.node.services.User
@@ -104,20 +105,22 @@ class Main : App(MainView::class) {
  */
 fun main(args: Array<String>) {
     val portAllocation = PortAllocation.Incremental(20000)
-    driver(portAllocation = portAllocation) {
-        val user = User("user1", "test", permissions = setOf(startFlowPermission<CashFlow>()))
+    driver(portAllocation = portAllocation, isDebug = true) {
+        val user = User("user1", "test", permissions = setOf(startFlowPermission<CashFlow>(), startFlowPermission<IssuanceRequester>()))
         // TODO : Supported flow should be exposed somehow from the node instead of set of ServiceInfo.
-        val notary = startNode("Notary", advertisedServices = setOf(ServiceInfo(SimpleNotaryService.type)), customOverrides = mapOf("nearestCity" to "Zurich"))
-        val alice = startNode("Alice", rpcUsers = arrayListOf(user), advertisedServices = setOf(ServiceInfo(ServiceType.corda.getSubType("cash"))), customOverrides = mapOf("nearestCity" to "Paris"))
-        val bob = startNode("Bob", rpcUsers = arrayListOf(user), advertisedServices = setOf(ServiceInfo(ServiceType.corda.getSubType("cash"))), customOverrides = mapOf("nearestCity" to "Frankfurt"))
-        val issuer = startNode("Royal Mint", rpcUsers = arrayListOf(user), advertisedServices = setOf(ServiceInfo(ServiceType.corda.getSubType("cash"))), customOverrides = mapOf("nearestCity" to "London"))
+        val notary = startNode("Notary", advertisedServices = setOf(ServiceInfo(SimpleNotaryService.type)))
+        val alice = startNode("Alice", rpcUsers = arrayListOf(user), advertisedServices = setOf(ServiceInfo(ServiceType.corda.getSubType("cash"))))
+        val bob = startNode("Bob", rpcUsers = arrayListOf(user), advertisedServices = setOf(ServiceInfo(ServiceType.corda.getSubType("cash"))))
+        val issuerMint = startNode("Royal Mint", rpcUsers = arrayListOf(user), advertisedServices = setOf(ServiceInfo(ServiceType.corda.getSubType("issuer"))))
+        val issuerFed = startNode("Federal Reserve", rpcUsers = arrayListOf(user), advertisedServices = setOf(ServiceInfo(ServiceType.corda.getSubType("issuer"))))
 
         val notaryNode = notary.get()
         val aliceNode = alice.get()
         val bobNode = bob.get()
-        val issuerNode = issuer.get()
+        val issuerNodeMint = issuerMint.get()
+        val issuerNodeFed = issuerFed.get()
 
-        arrayOf(notaryNode, aliceNode, bobNode, issuerNode).forEach {
+        arrayOf(notaryNode, aliceNode, bobNode, issuerNodeMint, issuerNodeFed).forEach {
             println("${it.nodeInfo.legalIdentity} started on ${ArtemisMessagingComponent.toHostAndPort(it.nodeInfo.address)}")
         }
         // Register with alice to use alice's RPC proxy to create random events.
@@ -129,12 +132,17 @@ fun main(args: Array<String>) {
         bobClient.start(user.username, user.password)
         val bobRPC = bobClient.proxy()
 
-        val issuerClient = CordaRPCClient(ArtemisMessagingComponent.toHostAndPort(issuerNode.nodeInfo.address), FullNodeConfiguration(issuerNode.config))
-        issuerClient.start(user.username, user.password)
-        val bocRPC = issuerClient.proxy()
+        val issuerClientMint = CordaRPCClient(ArtemisMessagingComponent.toHostAndPort(issuerNodeMint.nodeInfo.address), FullNodeConfiguration(issuerNodeMint.config))
+        issuerClientMint.start(user.username, user.password)
+        val issuerRPCMint = issuerClientMint.proxy()
+
+        val issuerClientFed = CordaRPCClient(ArtemisMessagingComponent.toHostAndPort(issuerNodeMint.nodeInfo.address), FullNodeConfiguration(issuerNodeFed.config))
+        issuerClientFed.start(user.username, user.password)
+        val issuerRPCFed = issuerClientFed.proxy()
 
         val eventGenerator = EventGenerator(
-                parties = listOf(aliceNode.nodeInfo.legalIdentity, bobNode.nodeInfo.legalIdentity, issuerNode.nodeInfo.legalIdentity),
+                parties = listOf(aliceNode.nodeInfo.legalIdentity, bobNode.nodeInfo.legalIdentity,
+                                 issuerNodeMint.nodeInfo.legalIdentity, issuerNodeFed.nodeInfo.legalIdentity),
                 notary = notaryNode.nodeInfo.notaryIdentity
         )
 
@@ -146,15 +154,36 @@ fun main(args: Array<String>) {
                     Unit
                 }.generate(SplittableRandom())
             }
-            eventGenerator.bankOfCordaCommandGenerator.map { command ->
-                bocRPC.startFlow(::CashFlow, command)
+            eventGenerator.bankOfCordaExitGenerator.map { command ->
+                issuerRPCMint.startFlow(::CashFlow, command)
+                Unit
+            }.generate(SplittableRandom())
+            eventGenerator.bankOfCordaExitGenerator.map { command ->
+                issuerRPCFed.startFlow(::CashFlow, command)
+                Unit
+            }.generate(SplittableRandom())
+            eventGenerator.bankOfCordaIssueGenerator.map { command ->
+                issuerRPCMint.startFlow(::IssuanceRequester,
+                                 command.amount,
+                                 command.recipient,
+                                 command.issueRef,
+                                 issuerNodeMint.nodeInfo.legalIdentity)
+                Unit
+            }.generate(SplittableRandom())
+            eventGenerator.bankOfCordaIssueGenerator.map { command ->
+                issuerRPCFed.startFlow(::IssuanceRequester,
+                        command.amount,
+                        command.recipient,
+                        command.issueRef,
+                        issuerNodeFed.nodeInfo.legalIdentity)
                 Unit
             }.generate(SplittableRandom())
         }
 
         aliceClient.close()
         bobClient.close()
-        issuerClient.close()
+        issuerClientMint.close()
+        issuerClientMint.close()
         waitForAllNodesToFinish()
     }
 }

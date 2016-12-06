@@ -15,10 +15,12 @@ import net.corda.core.crypto.Party
 import net.corda.core.messaging.startFlow
 import net.corda.core.node.NodeInfo
 import net.corda.core.serialization.OpaqueBytes
+import net.corda.core.transactions.SignedTransaction
 import net.corda.explorer.model.CashTransaction
 import net.corda.explorer.views.bigDecimalFormatter
 import net.corda.explorer.views.byteFormatter
 import net.corda.explorer.views.stringConverter
+import net.corda.flows.IssuerFlow.IssuanceRequester
 import net.corda.flows.CashCommand
 import net.corda.flows.CashFlow
 import net.corda.flows.CashFlowResult
@@ -51,6 +53,7 @@ class NewTransaction : Fragment() {
     private val issueRef = SimpleObjectProperty<Byte>()
     // Inject data
     private val parties by observableList(NetworkIdentityModel::parties)
+    private val issuers by observableList { model: NetworkIdentityModel -> model.advertisedServicesOfType("corda.issuer") }
     private val rpcProxy by observableValue(NodeMonitorModel::proxyObservable)
     private val myIdentity by observableValue(NetworkIdentityModel::myIdentity)
     private val notaries by observableList(NetworkIdentityModel::notaries)
@@ -67,14 +70,29 @@ class NewTransaction : Fragment() {
             }
             dialog.show()
             runAsync {
-                rpcProxy.value!!.startFlow(::CashFlow, it).returnValue.toBlocking().first()
+                if (it is CashCommand.IssueCash) {
+                    myIdentity.value?.let { myIdentity ->
+                        rpcProxy.value!!.startFlow(::IssuanceRequester,
+                                it.amount,
+                                it.recipient,
+                                it.issueRef,
+                                myIdentity.legalIdentity).returnValue.toBlocking().first()
+                    }
+                }
+                else {
+                    rpcProxy.value!!.startFlow(::CashFlow, it).returnValue.toBlocking().first()
+                }
             }.ui {
                 dialog.contentText = when (it) {
+                    is SignedTransaction -> {
+                        dialog.alertType = Alert.AlertType.INFORMATION
+                        "Cash Issued \nTransaction ID : ${it.id} \nMessage"
+                    }
                     is CashFlowResult.Success -> {
                         dialog.alertType = Alert.AlertType.INFORMATION
                         "Transaction Started \nTransaction ID : ${it.transaction?.id} \nMessage : ${it.message}"
                     }
-                    is CashFlowResult.Failed -> {
+                    else -> {
                         dialog.alertType = Alert.AlertType.ERROR
                         it.toString()
                     }
@@ -115,7 +133,15 @@ class NewTransaction : Fragment() {
         root.disableProperty().bind(enableProperty.not())
 
         // Transaction Types Choice Box
-        transactionTypeCB.items = CashTransaction.values().asList().observable()
+        myIdentity.value?.let { myIdentity ->
+            transactionTypeCB.items =
+                    if (myIdentity.advertisedServices.any { it.info.type.id == "corda.issuer" }) {
+                        CashTransaction.values().asList().observable()
+                    }
+                    else {
+                        listOf(CashTransaction.Pay).observable()
+                    }
+        }
 
         // Party A textfield always display my identity name, not editable.
         partyATextField.isEditable = false
@@ -133,7 +159,7 @@ class NewTransaction : Fragment() {
         // Issuer
         issuerLabel.visibleProperty().bind(transactionTypeCB.valueProperty().isNotNull)
         issuerChoiceBox.apply {
-            items = cash.map { it.token.issuer.party }.unique().sorted()
+            items = issuers.map { it.legalIdentity }.unique().sorted()
             converter = stringConverter { it.name }
             visibleProperty().bind(transactionTypeCB.valueProperty().map { it == CashTransaction.Pay })
         }

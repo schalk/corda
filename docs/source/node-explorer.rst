@@ -1,8 +1,16 @@
 Node Explorer
 =============
 
-The node explorer provide views to the node's vault and transaction data using Corda's RPC framework.
-The user can execute cash transaction commands to issue and move cash to other party on the network or exit cash using the user interface.
+The node explorer provides views into a node's vault and transaction data using Corda's RPC framework.
+
+When connected to an *Issuer* node, a user can execute cash transaction commands to issue and move cash to itself or other
+parties on the network or to exit cash (for itself only).
+
+When connected to a standard node a user can only execute cash transaction commands to move cash to other parties on the network.
+
+.. note:: use the Explorer in conjunction with the Trader Demo and Bank of Corda samples to use existing *Issuer* nodes
+          Alternatively run the demo nodes as described below which will launch two different *Issuer* nodes:
+          a Royal Mint node and a Federal Reserve node.
 
 Running the UI
 --------------
@@ -25,11 +33,13 @@ Running demo nodes
 
     ./gradlew tools:explorer:runDemoNodes
 
-.. note:: 3 Corda nodes will be created on the following port on localhost by default.
+.. note:: 5 Corda nodes will be created on the following port on localhost by default.
 
    * Notary -> 20002
    * Alice -> 20004
    * Bob -> 20006
+   * Royal Mint -> 20008        (*Issuer node*)
+   * Federal Reserve -> 20010   (*Issuer node*)
 
 Interface
 ---------
@@ -38,7 +48,7 @@ Login
   Corda node address, username and password are required for login, the address is defaulted to localhost:0 if leave blank.
   Username and password can be configured via the ``rpcUsers`` field in node's configuration file; for demo nodes, it is defaulted to ``user1`` and ``test``.
   
-.. note:: If you are connecting to the demo nodes, only Alice and Bob (20004, 20006) are accessible using user1 credential, you won't be able to connect to the notary.
+.. note:: If you are connecting to the demo nodes, Alice, Bob, Royal Mint and Federal Reserve are all accessible using user1 credential, you won't be able to connect to the notary.
 
 .. image:: resources/explorer/login.png
    :scale: 50 %
@@ -57,12 +67,19 @@ Cash
 
 .. image:: resources/explorer/vault.png
 
-New cash transaction
-  This is where you can create new cash transactions. 
-  The user can choose from three transaction types (issue, pay and exit) and any party visible on the network. 
+New Transactions
+  This is where you can create new cash transactions.
+  The user can choose from three transaction types (issue, pay and exit) and any party visible on the network.
+
+  General nodes can only execute pay commands to any other party on the network.
+
+.. image:: resources/explorer/newTransactionCash.png
+
+Issuer Nodes
+  Issuer nodes can execute issue (to itself or to any other party), pay and exit transactions.
   The result of the transaction will be visible in the transaction screen when executed.
 
-.. image:: resources/explorer/newTransaction.png
+.. image:: resources/explorer/newTransactionIssuer.png
 
 Transactions
   The transaction view contains all transactions handled by the node in a table view. It shows basic information on the table e.g. Transaction ID, 
