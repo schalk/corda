@@ -15,7 +15,7 @@ class RollOutTests {
     val contract = arrange {
         rollOut("2016-09-01".ld, "2017-09-01".ld, Frequency.Monthly) {
             actions {
-                (acmeCorp or highStreetBank).may {
+                (acmeCorp or highStreetBank) may {
                     "transfer".givenThat(after(end)) {
                         highStreetBank.owes(acmeCorp, 10.K, USD)
                         next()
@@ -29,7 +29,7 @@ class RollOutTests {
     val contract2 = arrange {
         rollOut("2016-09-01".ld, "2017-09-01".ld, Frequency.Monthly) {
             actions {
-                (acmeCorp or highStreetBank).may {
+                (acmeCorp or highStreetBank) may {
                     "transfer".givenThat(after(end)) {
                         highStreetBank.owes(acmeCorp, 10.K, USD)
                         next()
@@ -43,7 +43,7 @@ class RollOutTests {
     val contractStep1a = arrange {
         rollOut("2016-10-03".ld, "2017-09-01".ld, Frequency.Monthly) {
             actions {
-                (acmeCorp or highStreetBank).may {
+                (acmeCorp or highStreetBank) may {
                     "transfer".givenThat(after(end)) {
                         highStreetBank.owes(acmeCorp, 10.K, USD)
                         next()
@@ -68,8 +68,8 @@ class RollOutTests {
     }
     val contract_action1 = arrange {
         actions {
-            highStreetBank.may {
-                "do it".anytime {
+            highStreetBank may {
+                "do it" anytime {
                     highStreetBank.owes(acmeCorp, 10.K, USD)
                 }
             }
@@ -77,8 +77,8 @@ class RollOutTests {
     }
     val contract_action2 = arrange {
         actions {
-            highStreetBank.may {
-                "do it".anytime {
+            highStreetBank may {
+                "do it" anytime {
                     highStreetBank.owes(acmeCorp, 10.K, USD)
                 }
             }
@@ -86,15 +86,15 @@ class RollOutTests {
     }
     val contract_and1 = arrange {
         actions {
-            highStreetBank.may {
-                "do it".anytime {
+            highStreetBank may {
+                "do it" anytime {
                     highStreetBank.owes(acmeCorp, 10.K, USD)
                 }
             }
         }
         actions {
-            acmeCorp.may {
-                "do it".anytime {
+            acmeCorp may {
+                "do it" anytime {
                     acmeCorp.owes(momAndPop, 10.K, USD)
                 }
             }
@@ -104,15 +104,15 @@ class RollOutTests {
     }
     val contract_and2 = arrange {
         actions {
-            highStreetBank.may {
-                "do it".anytime {
+            highStreetBank may {
+                "do it" anytime {
                     highStreetBank.owes(acmeCorp, 10.K, USD)
                 }
             }
         }
         actions {
-            acmeCorp.may {
-                "do it".anytime {
+            acmeCorp may {
+                "do it" anytime {
                     acmeCorp.owes(momAndPop, 10.K, USD)
                 }
             }
