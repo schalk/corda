@@ -9,7 +9,7 @@ import net.corda.core.transactions.SignedTransaction
 import net.corda.core.utilities.Emoji
 import net.corda.core.utilities.loggerFor
 import net.corda.flows.IssuerFlow.IssuanceRequester
-import net.corda.traderdemo.BANK_OF_CORDA
+import net.corda.testing.BOC
 import net.corda.traderdemo.flow.SellerFlow
 import java.util.*
 import javax.ws.rs.*
@@ -33,8 +33,8 @@ class TraderDemoApi(val rpc: CordaRPCOps) {
     @Path("create-test-cash")
     @Consumes(MediaType.APPLICATION_JSON)
     fun createTestCash(params: TestCashParams): Response {
-        val bankOfCordaParty = rpc.partyFromName(BANK_OF_CORDA)
-                ?: throw Exception("Unable to locate ${BANK_OF_CORDA} in Network Map Service")
+        val bankOfCordaParty = rpc.partyFromName(BOC.name)
+                ?: throw Exception("Unable to locate ${BOC.name} in Network Map Service")
         val me = rpc.nodeIdentity()
         // TODO: revert back to multiple issue request amounts (3,10) when soft locking implemented
         val amounts = calculateRandomlySizedAmounts(params.amount.DOLLARS, 1, 1, Random())
