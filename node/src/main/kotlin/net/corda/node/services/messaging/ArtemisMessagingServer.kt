@@ -9,15 +9,18 @@ import net.corda.core.crypto.X509Utilities.CORDA_CLIENT_CA
 import net.corda.core.crypto.X509Utilities.CORDA_ROOT_CA
 import net.corda.core.crypto.newSecureRandom
 import net.corda.core.div
+import net.corda.core.minutes
 import net.corda.core.node.services.NetworkMapCache
 import net.corda.core.node.services.NetworkMapCache.MapChange
+import net.corda.core.seconds
 import net.corda.core.utilities.debug
 import net.corda.core.utilities.loggerFor
+import net.corda.node.internal.NetworkMapInfo
 import net.corda.node.printBasicNodeInfo
 import net.corda.node.services.RPCUserService
 import net.corda.node.services.config.NodeConfiguration
-import net.corda.node.services.messaging.ArtemisMessagingComponent.ConnectionDirection.INBOUND
-import net.corda.node.services.messaging.ArtemisMessagingComponent.ConnectionDirection.OUTBOUND
+import net.corda.node.services.messaging.ArtemisMessagingComponent.ConnectionDirection.Inbound
+import net.corda.node.services.messaging.ArtemisMessagingComponent.ConnectionDirection.Outbound
 import net.corda.node.services.messaging.ArtemisMessagingServer.NodeLoginModule.Companion.NODE_ROLE
 import net.corda.node.services.messaging.ArtemisMessagingServer.NodeLoginModule.Companion.PEER_ROLE
 import net.corda.node.services.messaging.ArtemisMessagingServer.NodeLoginModule.Companion.RPC_ROLE
@@ -104,12 +107,13 @@ class ArtemisMessagingServer(override val config: NodeConfiguration,
         running = false
     }
 
-    fun bridgeToNetworkMapService(networkMapService: NetworkMapAddress) {
-        val query = activeMQServer.queueQuery(NETWORK_MAP_ADDRESS)
+    fun bridgeToNetworkMapService(networkMapInfo: NetworkMapInfo) {
+        val queue = SimpleString(NETWORK_MAP_ADDRESS)
+        val query = activeMQServer.queueQuery(queue)
         if (!query.isExists) {
-            activeMQServer.createQueue(NETWORK_MAP_ADDRESS, NETWORK_MAP_ADDRESS, null, true, false)
+            activeMQServer.createQueue(queue, queue, null, true, false)
         }
-        maybeDeployBridgeForAddress(networkMapService)
+        deployBridgeIfAbsent(networkMapInfo.address, networkMapInfo.legalName)
     }
 
     /**
@@ -126,8 +130,10 @@ class ArtemisMessagingServer(override val config: NodeConfiguration,
             is MapChange.Removed -> null to change.node
             is MapChange.Added -> change.node to null
         }
-        (staleNode?.address as? ArtemisAddress)?.let { maybeDestroyBridge(it.queueName) }
-        (newNode?.address as? ArtemisAddress)?.let { if (activeMQServer.queueQuery(it.queueName).isExists) maybeDeployBridgeForAddress(it) }
+        (staleNode?.address as? ArtemisAddress)?.let { activeMQServer.destroyBridge(it.queueName) }
+        if (newNode != null) {
+            (newNode.address as? ArtemisAddress)?.let { deployBridgeIfAbsent(it, newNode.legalIdentity.name) }
+        }
     }
 
     private fun configureAndStartServer() {
@@ -154,7 +160,7 @@ class ArtemisMessagingServer(override val config: NodeConfiguration,
             if (nodeInfo != null) {
                 val address = nodeInfo.address
                 if (address is NodeAddress) {
-                    maybeDeployBridgeForAddress(address)
+                    deployBridgeIfAbsent(address, nodeInfo.legalIdentity.name)
                 } else {
                     log.error("Don't know how to deal with $address")
                 }
@@ -171,7 +177,7 @@ class ArtemisMessagingServer(override val config: NodeConfiguration,
         bindingsDirectory = (artemisDir / "bindings").toString()
         journalDirectory = (artemisDir / "journal").toString()
         largeMessagesDirectory = (artemisDir / "large-messages").toString()
-        acceptorConfigurations = setOf(tcpTransport(INBOUND, "0.0.0.0", myHostPort.port))
+        acceptorConfigurations = setOf(tcpTransport(Inbound, "0.0.0.0", myHostPort.port))
         // Enable built in message deduplication. Note we still have to do our own as the delayed commits
         // and our own definition of commit mean that the built in deduplication cannot remove all duplicates.
         idCacheSize = 2000 // Artemis Default duplicate cache size i.e. a guess
@@ -180,7 +186,7 @@ class ArtemisMessagingServer(override val config: NodeConfiguration,
         managementNotificationAddress = SimpleString(NOTIFICATIONS_ADDRESS)
         // Artemis allows multiple servers to be grouped together into a cluster for load balancing purposes. The cluster
         // user is used for connecting the nodes together. It has super-user privileges and so it's imperative that its
-        // password is changed from the default (as warned in the docs). Since we don't need this feature we turn it off
+        // password be changed from the default (as warned in the docs). Since we don't need this feature we turn it off
         // by having its password be an unknown securely random 128-bit value.
         clusterPassword = BigInteger(128, newSecureRandom()).toString(16)
         configureAddressSecurity()
@@ -233,23 +239,7 @@ class ArtemisMessagingServer(override val config: NodeConfiguration,
         return ActiveMQJAASSecurityManager(NodeLoginModule::class.java.name, securityConfig)
     }
 
-    private fun connectorExists(hostAndPort: HostAndPort) = hostAndPort.toString() in activeMQServer.configuration.connectorConfigurations
-
-    private fun addConnector(hostAndPort: HostAndPort) = activeMQServer.configuration.addConnectorConfiguration(
-            hostAndPort.toString(),
-            tcpTransport(OUTBOUND, hostAndPort.hostText, hostAndPort.port)
-    )
-
-    private fun bridgeExists(name: SimpleString) = activeMQServer.clusterManager.bridges.containsKey(name.toString())
-
-    private fun maybeDeployBridgeForAddress(address: ArtemisAddress) {
-        if (!connectorExists(address.hostAndPort)) {
-            addConnector(address.hostAndPort)
-        }
-        if (!bridgeExists(address.queueName)) {
-            deployBridge(address)
-        }
-    }
+    private fun bridgeExists(address: ArtemisAddress): Boolean = activeMQServer.clusterManager.bridges.containsKey(address.queueName)
 
     /**
      * All nodes are expected to have a public facing address called [ArtemisMessagingComponent.P2P_QUEUE] for receiving
@@ -257,25 +247,32 @@ class ArtemisMessagingServer(override val config: NodeConfiguration,
      * as defined by ArtemisAddress.queueName. A bridge is then created to forward messages from this queue to the node's
      * P2P address.
      */
-    private fun deployBridge(address: ArtemisAddress) {
+    private fun deployBridgeIfAbsent(address: ArtemisAddress, peerLegalName: String) {
+        if (bridgeExists(address)) return
+
+        activeMQServer.configuration.connectorConfigurations[address.queueName] = tcpTransport(
+                Outbound(expectedCommonName = peerLegalName),
+                address.hostAndPort.hostText,
+                address.hostAndPort.port)
+
         activeMQServer.deployBridge(BridgeConfiguration().apply {
-            name = address.queueName.toString()
-            queueName = address.queueName.toString()
+            name = address.queueName
+            queueName = address.queueName
             forwardingAddress = P2P_QUEUE
-            staticConnectors = listOf(address.hostAndPort.toString())
+            staticConnectors = listOf(address.queueName)
             confirmationWindowSize = 100000 // a guess
             isUseDuplicateDetection = true // Enable the bridge's automatic deduplication logic
+            // We keep trying until the network map deems the node unreachable and tells us it's been removed at which
+            // point we destroy the bridge
+            // TODO Give some thought to the retry settings
+            retryInterval = 5.seconds.toMillis()
+            retryIntervalMultiplier = 1.5  // Exponential backoff
+            maxRetryInterval = 30.minutes.toMillis()
             // As a peer of the target node we must connect to it using the peer user. Actual authentication is done using
             // our TLS certificate.
             user = PEER_USER
             password = PEER_USER
         })
-    }
-
-    private fun maybeDestroyBridge(name: SimpleString) {
-        if (bridgeExists(name)) {
-            activeMQServer.destroyBridge(name.toString())
-        }
     }
 
     /**

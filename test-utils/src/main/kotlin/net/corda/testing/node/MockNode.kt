@@ -5,6 +5,7 @@ import com.google.common.jimfs.Jimfs
 import com.google.common.util.concurrent.Futures
 import net.corda.core.*
 import net.corda.core.crypto.Party
+import net.corda.core.messaging.RPCOps
 import net.corda.core.messaging.SingleMessageRecipient
 import net.corda.core.node.CordaPluginRegistry
 import net.corda.core.node.PhysicalLocation
@@ -15,7 +16,6 @@ import net.corda.node.internal.AbstractNode
 import net.corda.node.services.api.MessagingServiceInternal
 import net.corda.node.services.config.NodeConfiguration
 import net.corda.node.services.keys.E2ETestKeyManagementService
-import net.corda.core.messaging.RPCOps
 import net.corda.node.services.network.InMemoryNetworkMapService
 import net.corda.node.services.network.NetworkMapService
 import net.corda.node.services.transactions.InMemoryUniquenessProvider
@@ -103,8 +103,12 @@ class MockNetwork(private val networkSendManuallyPumped: Boolean = false,
                 }
             }
 
-    open class MockNode(config: NodeConfiguration, val mockNet: MockNetwork, networkMapAddr: SingleMessageRecipient?,
-                        advertisedServices: Set<ServiceInfo>, val id: Int, val keyPair: KeyPair?) : AbstractNode(config, networkMapAddr, advertisedServices, TestClock()) {
+    open class MockNode(config: NodeConfiguration,
+                        val mockNet: MockNetwork,
+                        override val networkMapAddress: SingleMessageRecipient?,
+                        advertisedServices: Set<ServiceInfo>,
+                        val id: Int,
+                        val keyPair: KeyPair?) : AbstractNode(config, advertisedServices, TestClock()) {
         override val log: Logger = loggerFor<MockNode>()
         override val serverThread: AffinityExecutor =
                 if (mockNet.threadPerNode)
