@@ -8,6 +8,7 @@ import javafx.scene.control.ButtonType
 import javafx.scene.image.Image
 import javafx.stage.Stage
 import jfxtras.resources.JFXtrasFontRoboto
+import joptsimple.OptionParser
 import net.corda.client.mock.EventGenerator
 import net.corda.client.model.Models
 import net.corda.client.model.observableValue
@@ -133,74 +134,80 @@ fun main(args: Array<String>) {
         arrayOf(notaryNode, aliceNode, bobNode, issuerNodeGBP, issuerNodeUSD).forEach {
             println("${it.nodeInfo.legalIdentity} started on ${ArtemisMessagingComponent.toHostAndPort(it.nodeInfo.address)}")
         }
-        // Register with alice to use alice's RPC proxy to create random events.
-        val aliceClient = CordaRPCClient(ArtemisMessagingComponent.toHostAndPort(aliceNode.nodeInfo.address), FullNodeConfiguration(aliceNode.config))
-        aliceClient.start(user.username, user.password)
-        val aliceRPC = aliceClient.proxy()
 
-        val bobClient = CordaRPCClient(ArtemisMessagingComponent.toHostAndPort(bobNode.nodeInfo.address), FullNodeConfiguration(bobNode.config))
-        bobClient.start(user.username, user.password)
-        val bobRPC = bobClient.proxy()
+        val parser = OptionParser("S")
+        val options = parser.parse(*args)
+        if (options.has("S")) {
+            println("Running simulation mode ...")
 
-        val issuerClientGBP = CordaRPCClient(ArtemisMessagingComponent.toHostAndPort(issuerNodeGBP.nodeInfo.address), FullNodeConfiguration(issuerNodeGBP.config))
-        issuerClientGBP.start(user.username, user.password)
-        val issuerRPCGBP = issuerClientGBP.proxy()
+            // Register with alice to use alice's RPC proxy to create random events.
+            val aliceClient = CordaRPCClient(ArtemisMessagingComponent.toHostAndPort(aliceNode.nodeInfo.address), FullNodeConfiguration(aliceNode.config))
+            aliceClient.start(user.username, user.password)
+            val aliceRPC = aliceClient.proxy()
 
-        val issuerClientUSD = CordaRPCClient(ArtemisMessagingComponent.toHostAndPort(issuerNodeGBP.nodeInfo.address), FullNodeConfiguration(issuerNodeUSD.config))
-        issuerClientUSD.start(user.username, user.password)
-        val issuerRPCUSD = issuerClientUSD.proxy()
+            val bobClient = CordaRPCClient(ArtemisMessagingComponent.toHostAndPort(bobNode.nodeInfo.address), FullNodeConfiguration(bobNode.config))
+            bobClient.start(user.username, user.password)
+            val bobRPC = bobClient.proxy()
 
-        val eventGenerator = EventGenerator(
-                parties = listOf(aliceNode.nodeInfo.legalIdentity, bobNode.nodeInfo.legalIdentity),
-                notary = notaryNode.nodeInfo.notaryIdentity
-        )
+            val issuerClientGBP = CordaRPCClient(ArtemisMessagingComponent.toHostAndPort(issuerNodeGBP.nodeInfo.address), FullNodeConfiguration(issuerNodeGBP.config))
+            issuerClientGBP.start(user.username, user.password)
+            val issuerRPCGBP = issuerClientGBP.proxy()
 
-        val issuerEventGenerator = EventGenerator(
-                parties = listOf(issuerNodeGBP.nodeInfo.legalIdentity, issuerNodeUSD.nodeInfo.legalIdentity,
-                                 aliceNode.nodeInfo.legalIdentity, bobNode.nodeInfo.legalIdentity),
-                notary = notaryNode.nodeInfo.notaryIdentity
-        )
+            val issuerClientUSD = CordaRPCClient(ArtemisMessagingComponent.toHostAndPort(issuerNodeGBP.nodeInfo.address), FullNodeConfiguration(issuerNodeUSD.config))
+            issuerClientUSD.start(user.username, user.password)
+            val issuerRPCUSD = issuerClientUSD.proxy()
 
-        for (i in 0..1000) {
-            Thread.sleep(500)
-            // Party pay requests
-            listOf(aliceRPC, bobRPC).forEach {
-                eventGenerator.clientCommandGenerator.map { command ->
-                    it.startFlow(::CashFlow, command)
+            val eventGenerator = EventGenerator(
+                    parties = listOf(aliceNode.nodeInfo.legalIdentity, bobNode.nodeInfo.legalIdentity),
+                    notary = notaryNode.nodeInfo.notaryIdentity
+            )
+
+            val issuerEventGenerator = EventGenerator(
+                    parties = listOf(issuerNodeGBP.nodeInfo.legalIdentity, issuerNodeUSD.nodeInfo.legalIdentity,
+                            aliceNode.nodeInfo.legalIdentity, bobNode.nodeInfo.legalIdentity),
+                    notary = notaryNode.nodeInfo.notaryIdentity
+            )
+
+            for (i in 0..1000) {
+                Thread.sleep(500)
+                // Party pay requests
+                listOf(aliceRPC, bobRPC).forEach {
+                    eventGenerator.clientCommandGenerator.map { command ->
+                        it.startFlow(::CashFlow, command)
+                        Unit
+                    }.generate(SplittableRandom())
+                }
+                // Issuer requests
+                issuerEventGenerator.bankOfCordaExitGenerator.map { command ->
+                    issuerRPCGBP.startFlow(::CashFlow, command)
+                    Unit
+                }.generate(SplittableRandom())
+                issuerEventGenerator.bankOfCordaExitGenerator.map { command ->
+                    issuerRPCUSD.startFlow(::CashFlow, command)
+                    Unit
+                }.generate(SplittableRandom())
+                issuerEventGenerator.bankOfCordaIssueGenerator.map { command ->
+                    issuerRPCGBP.startFlow(::IssuanceRequester,
+                            command.amount,
+                            command.recipient,
+                            command.issueRef,
+                            issuerNodeGBP.nodeInfo.legalIdentity)
+                    Unit
+                }.generate(SplittableRandom())
+                issuerEventGenerator.bankOfCordaIssueGenerator.map { command ->
+                    issuerRPCUSD.startFlow(::IssuanceRequester,
+                            command.amount,
+                            command.recipient,
+                            command.issueRef,
+                            issuerNodeUSD.nodeInfo.legalIdentity)
                     Unit
                 }.generate(SplittableRandom())
             }
-            // Issuer requests
-            issuerEventGenerator.bankOfCordaExitGenerator.map { command ->
-                issuerRPCGBP.startFlow(::CashFlow, command)
-                Unit
-            }.generate(SplittableRandom())
-            issuerEventGenerator.bankOfCordaExitGenerator.map { command ->
-                issuerRPCUSD.startFlow(::CashFlow, command)
-                Unit
-            }.generate(SplittableRandom())
-            issuerEventGenerator.bankOfCordaIssueGenerator.map { command ->
-                issuerRPCGBP.startFlow(::IssuanceRequester,
-                                 command.amount,
-                                 command.recipient,
-                                 command.issueRef,
-                                 issuerNodeGBP.nodeInfo.legalIdentity)
-                Unit
-            }.generate(SplittableRandom())
-            issuerEventGenerator.bankOfCordaIssueGenerator.map { command ->
-                issuerRPCUSD.startFlow(::IssuanceRequester,
-                        command.amount,
-                        command.recipient,
-                        command.issueRef,
-                        issuerNodeUSD.nodeInfo.legalIdentity)
-                Unit
-            }.generate(SplittableRandom())
+            aliceClient.close()
+            bobClient.close()
+            issuerClientGBP.close()
+            issuerClientUSD.close()
         }
-
-        aliceClient.close()
-        bobClient.close()
-        issuerClientGBP.close()
-        issuerClientUSD.close()
         waitForAllNodesToFinish()
     }
 }
