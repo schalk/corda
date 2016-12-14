@@ -150,11 +150,11 @@ fun main(args: Array<String>) {
             val bobRPC = bobClient.proxy()
 
             val issuerClientGBP = CordaRPCClient(ArtemisMessagingComponent.toHostAndPort(issuerNodeGBP.nodeInfo.address), FullNodeConfiguration(issuerNodeGBP.config))
-            issuerClientGBP.start(user.username, user.password)
+            issuerClientGBP.start(manager.username, manager.password)
             val issuerRPCGBP = issuerClientGBP.proxy()
 
             val issuerClientUSD = CordaRPCClient(ArtemisMessagingComponent.toHostAndPort(issuerNodeGBP.nodeInfo.address), FullNodeConfiguration(issuerNodeUSD.config))
-            issuerClientUSD.start(user.username, user.password)
+            issuerClientUSD.start(manager.username, manager.password)
             val issuerRPCUSD = issuerClientUSD.proxy()
 
             val eventGenerator = EventGenerator(
