@@ -3,7 +3,6 @@ package net.corda.explorer.views.cordapps.cash
 import javafx.beans.binding.Bindings
 import javafx.beans.binding.BooleanBinding
 import javafx.beans.property.SimpleObjectProperty
-import javafx.collections.FXCollections
 import javafx.scene.control.*
 import javafx.stage.Window
 import net.corda.client.fxutils.isNotNull
@@ -17,6 +16,9 @@ import net.corda.core.node.NodeInfo
 import net.corda.core.serialization.OpaqueBytes
 import net.corda.core.transactions.SignedTransaction
 import net.corda.explorer.model.CashTransaction
+import net.corda.explorer.model.IssuerModel
+import net.corda.explorer.model.currencyTypes
+import net.corda.explorer.model.transactionTypes
 import net.corda.explorer.views.bigDecimalFormatter
 import net.corda.explorer.views.byteFormatter
 import net.corda.explorer.views.stringConverter
@@ -27,7 +29,6 @@ import net.corda.flows.CashFlowResult
 import org.controlsfx.dialog.ExceptionDialog
 import tornadofx.Fragment
 import tornadofx.booleanBinding
-import tornadofx.observable
 import java.math.BigDecimal
 import java.util.*
 
@@ -53,7 +54,7 @@ class NewTransaction : Fragment() {
     private val issueRef = SimpleObjectProperty<Byte>()
     // Inject data
     private val parties by observableList(NetworkIdentityModel::parties)
-    private val issuers by observableList { model: NetworkIdentityModel -> model.advertisedServicesOfType("corda.issuer") }
+    private val issuers by observableList(IssuerModel::issuers)
     private val rpcProxy by observableValue(NodeMonitorModel::proxyObservable)
     private val myIdentity by observableValue(NetworkIdentityModel::myIdentity)
     private val notaries by observableList(NetworkIdentityModel::notaries)
@@ -133,15 +134,7 @@ class NewTransaction : Fragment() {
         root.disableProperty().bind(enableProperty.not())
 
         // Transaction Types Choice Box
-        myIdentity.value?.let { myIdentity ->
-            transactionTypeCB.items =
-                    if (myIdentity.advertisedServices.any { it.info.type.id == "corda.issuer" }) {
-                        CashTransaction.values().asList().observable()
-                    }
-                    else {
-                        listOf(CashTransaction.Pay).observable()
-                    }
-        }
+        transactionTypeCB.items = transactionTypes(myIdentity.value)
 
         // Party A textfield always display my identity name, not editable.
         partyATextField.isEditable = false
@@ -178,7 +171,7 @@ class NewTransaction : Fragment() {
         // Currency
         currencyLabel.visibleProperty().bind(transactionTypeCB.valueProperty().isNotNull)
         // TODO : Create a currency model to store these values
-        currencyChoiceBox.items = FXCollections.observableList(setOf(USD, GBP, CHF).toList())
+        currencyChoiceBox.items = currencyTypes(myIdentity.value)
         currencyChoiceBox.visibleProperty().bind(transactionTypeCB.valueProperty().isNotNull)
         val issuer = Bindings.createObjectBinding({ if (issuerChoiceBox.isVisible) issuerChoiceBox.value else myIdentity.value?.legalIdentity }, arrayOf(myIdentity, issuerChoiceBox.visibleProperty(), issuerChoiceBox.valueProperty()))
         availableAmount.visibleProperty().bind(
